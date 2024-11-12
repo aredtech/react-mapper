@@ -30,7 +30,8 @@ const RotatedImageOverlay: React.FC<{
   url: string;
   bounds: L.LatLngBounds;
   rotation: number;
-}> = ({ url, bounds, rotation }) => {
+  opacity?: number;
+}> = ({ url, bounds, rotation, opacity = 1 }) => {
   const map = useMap();
   const imageRef = React.useRef<L.ImageOverlay>(null);
 
@@ -40,11 +41,11 @@ const RotatedImageOverlay: React.FC<{
       if (element) {
         element.style.transform = `rotate(${rotation}deg)`;
         element.style.transformOrigin = "center center";
+        element.style.opacity = opacity.toString();
       }
     }
-  }, [rotation]);
+  }, [rotation, opacity]);
 
-  // Update transform origin when map moves
   useMapEvent("move", () => {
     if (imageRef.current) {
       const element = imageRef.current.getElement();
@@ -67,6 +68,43 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
   const selectedBuildingRef = useRef<L.Layer | null>(null);
   const [floorMap, setFloorMap] = useState<FloorMapState | null>(null);
   const [showControls, setShowControls] = useState(false);
+  const [opacity, setOpacity] = useState(1);
+
+  const controlsStyle = {
+    position: "fixed" as const,
+    top: "20px",
+    right: "20px",
+    backgroundColor: "white",
+    padding: "16px",
+    borderRadius: "8px",
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.1)",
+    zIndex: 1000,
+    width: "300px",
+  };
+
+  const sliderStyle = {
+    width: "100%",
+    marginTop: "8px",
+    marginBottom: "16px",
+  };
+
+  const labelStyle = {
+    display: "block",
+    marginBottom: "8px",
+    fontWeight: "500" as const,
+    color: "#374151",
+  };
+
+  const buttonStyle = {
+    backgroundColor: "#EF4444",
+    color: "white",
+    padding: "8px 16px",
+    borderRadius: "4px",
+    border: "none",
+    cursor: "pointer",
+    width: "100%",
+    fontWeight: "500" as const,
+  };
 
   const fetchBuildingData = async () => {
     if (map.getZoom() < 15) {
@@ -134,6 +172,7 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
         rotation: 0,
       });
       setShowControls(true);
+      setOpacity(1); // Reset opacity when new image is uploaded
 
       (
         currentSelectedBuilding as L.Layer & { closePopup(): void }
@@ -202,6 +241,11 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
     }
   };
 
+  const handleOpacityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newOpacity = parseFloat(e.target.value);
+    setOpacity(newOpacity);
+  };
+
   // Cleanup URL when component unmounts or floor map is removed
   useEffect(() => {
     return () => {
@@ -229,12 +273,13 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
             url={floorMap.url}
             bounds={floorMap.bounds}
             rotation={floorMap.rotation}
+            opacity={opacity}
           />
 
           {showControls && (
-            <div className="absolute top-4 right-4 bg-white p-4 rounded shadow-lg z-50">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700">
+            <div style={controlsStyle}>
+              <div>
+                <label style={labelStyle}>
                   Scale
                   <input
                     type="range"
@@ -243,13 +288,16 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
                     step="0.1"
                     value={floorMap.scale}
                     onChange={handleScaleChange}
-                    className="w-full mt-1"
+                    style={sliderStyle}
                   />
+                  <span style={{ float: "right" }}>
+                    {floorMap.scale.toFixed(1)}x
+                  </span>
                 </label>
               </div>
 
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700">
+              <div>
+                <label style={labelStyle}>
                   Rotation
                   <input
                     type="range"
@@ -258,8 +306,27 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
                     step="1"
                     value={floorMap.rotation}
                     onChange={handleRotationChange}
-                    className="w-full mt-1"
+                    style={sliderStyle}
                   />
+                  <span style={{ float: "right" }}>{floorMap.rotation}°</span>
+                </label>
+              </div>
+
+              <div>
+                <label style={labelStyle}>
+                  Opacity
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={opacity}
+                    onChange={handleOpacityChange}
+                    style={sliderStyle}
+                  />
+                  <span style={{ float: "right" }}>
+                    {(opacity * 100).toFixed(0)}%
+                  </span>
                 </label>
               </div>
 
@@ -271,7 +338,7 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
                   setFloorMap(null);
                   setShowControls(false);
                 }}
-                className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                style={buttonStyle}
               >
                 Remove Floor Map
               </button>
