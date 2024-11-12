@@ -23,6 +23,7 @@ interface FloorMapState {
   bounds: L.LatLngBounds;
   scale: number;
   rotation: number;
+  masked: boolean;
 }
 
 // Custom wrapper component for rotated image overlay
@@ -31,7 +32,8 @@ const RotatedImageOverlay: React.FC<{
   bounds: L.LatLngBounds;
   rotation: number;
   opacity?: number;
-}> = ({ url, bounds, rotation, opacity = 1 }) => {
+  clipPath?: string;
+}> = ({ url, bounds, rotation, opacity = 1, clipPath }) => {
   const map = useMap();
   const imageRef = React.useRef<L.ImageOverlay>(null);
 
@@ -42,9 +44,12 @@ const RotatedImageOverlay: React.FC<{
         element.style.transform = `rotate(${rotation}deg)`;
         element.style.transformOrigin = "center center";
         element.style.opacity = opacity.toString();
+        if (clipPath) {
+          element.style.clipPath = clipPath;
+        }
       }
     }
-  }, [rotation, opacity]);
+  }, [rotation, opacity, clipPath]);
 
   useMapEvent("move", () => {
     if (imageRef.current) {
@@ -69,6 +74,7 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
   const [floorMap, setFloorMap] = useState<FloorMapState | null>(null);
   const [showControls, setShowControls] = useState(false);
   const [opacity, setOpacity] = useState(1);
+  const [clipPath, setClipPath] = useState<string>("");
 
   const controlsStyle = {
     position: "fixed" as const,
@@ -104,7 +110,31 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
     cursor: "pointer",
     width: "100%",
     fontWeight: "500" as const,
+    marginBottom: "8px",
   };
+
+  const toggleButtonStyle = {
+    ...buttonStyle,
+    backgroundColor: "#3B82F6",
+  };
+
+  const updateClipPath = useCallback(() => {
+    if (selectedBuildingRef.current && floorMap?.masked) {
+      const layer = selectedBuildingRef.current as L.Polygon;
+      const points = layer.getLatLngs()[0] as L.LatLng[];
+      const clipPoints = points.map((point) => {
+        const pixel = map.latLngToContainerPoint(point as L.LatLng);
+        return `${pixel.x}px ${pixel.y}px`;
+      });
+      setClipPath(`polygon(${clipPoints.join(", ")})`);
+    } else {
+      setClipPath("");
+    }
+  }, [map, floorMap?.masked]);
+
+  // Update clip path on map movement
+  useMapEvent("move", updateClipPath);
+  useMapEvent("zoom", updateClipPath);
 
   const fetchBuildingData = async () => {
     if (map.getZoom() < 15) {
@@ -155,24 +185,26 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
   }, [map, debouncedFetchBuildingData]);
 
   const handleFileUpload = useCallback((e: Event) => {
+    e.stopPropagation();
     const input = e.target as HTMLInputElement;
     const currentSelectedBuilding = selectedBuildingRef.current;
-
+    console.log(currentSelectedBuilding);
     if (input.files && input.files[0] && currentSelectedBuilding) {
       const file = input.files[0];
       const imageUrl = URL.createObjectURL(file);
       const bounds = (
         currentSelectedBuilding as L.Layer & { getBounds(): L.LatLngBounds }
       ).getBounds();
-
+      console.log(bounds);
       setFloorMap({
         url: imageUrl,
         bounds,
         scale: 1,
         rotation: 0,
+        masked: false,
       });
       setShowControls(true);
-      setOpacity(1); // Reset opacity when new image is uploaded
+      setOpacity(1);
 
       (
         currentSelectedBuilding as L.Layer & { closePopup(): void }
@@ -185,13 +217,17 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
       const layer = e.target;
       selectedBuildingRef.current = layer;
 
-      const popupContent = `
-      <div class="p-4">
-        <input type="file" accept="image/*" id="floor-map-input" class="mb-2" />
-      </div>
-    `;
+      const popupContent = document.createElement("div");
+      popupContent.className = "p-4";
+      popupContent.innerHTML =
+        '<input type="file" accept="image/*" id="floor-map-input" class="mb-2" />';
 
-      layer.bindPopup(popupContent).openPopup();
+      // Prevent click propagation on the popup content
+      popupContent.addEventListener("click", (e) => e.stopPropagation());
+
+      const popup = L.popup().setContent(popupContent).setLatLng(e.latlng);
+
+      layer.bindPopup(popup).openPopup();
 
       // Remove any existing event listener before adding a new one
       const existingInput = document.getElementById("floor-map-input");
@@ -246,6 +282,19 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
     setOpacity(newOpacity);
   };
 
+  const toggleMask = () => {
+    setFloorMap((prev) => {
+      if (!prev) return null;
+      const masked = !prev.masked;
+      if (masked) {
+        updateClipPath();
+      } else {
+        setClipPath("");
+      }
+      return { ...prev, masked };
+    });
+  };
+
   // Cleanup URL when component unmounts or floor map is removed
   useEffect(() => {
     return () => {
@@ -274,6 +323,7 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
             bounds={floorMap.bounds}
             rotation={floorMap.rotation}
             opacity={opacity}
+            clipPath={clipPath}
           />
 
           {showControls && (
@@ -330,6 +380,10 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
                 </label>
               </div>
 
+              <button onClick={toggleMask} style={toggleButtonStyle}>
+                {floorMap.masked ? "Disable Mask" : "Enable Mask"}
+              </button>
+
               <button
                 onClick={() => {
                   if (floorMap?.url) {
@@ -337,6 +391,7 @@ const BuildingsLayer: React.FC<BuildingsLayerProps> = ({ style }) => {
                   }
                   setFloorMap(null);
                   setShowControls(false);
+                  setClipPath("");
                 }}
                 style={buttonStyle}
               >
